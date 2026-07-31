@@ -26,12 +26,23 @@ export const ALLOWED_TYPES = [
   "compute", "community", "forum", "human",
 ];
 
-// A security listing has to show it is legitimate: either it references
-// authorization/scope, or it frames the work as defensive / on the poster's own
-// system. This is the machine-checkable half of the guardrail in CLAUDE.md and
-// AGENTS.md §6 ("security work is authorized-only").
+// A HEURISTIC TRIPWIRE, not an enforcement boundary. Offensive-security work can
+// always be worded around a regex; the point is to make it awkward to post
+// unauthorized red-team work casually and to nudge posters to state authorization.
+// Real security controls are elsewhere (path-restricted auto-merge, slug ids, the
+// URL-scheme allowlist, the CSP). See CLAUDE.md guardrails and AGENTS.md §6.
+//
+// SECURITY_TRIGGER decides which listings must show legitimacy: any in a security
+// subcat, plus any that mention offensive-security work in an unambiguous way
+// (deliberately NOT "adversarial"/"exploit"/"jailbreak", which have ordinary ML
+// meanings and would flag benign data/eval listings).
+export const SECURITY_TRIGGER = /red[ -]?team|\bpentest\b|penetration test|red-teaming/i;
+
+// SECURITY_SIGNAL is the legitimacy language we require: authorization/scope, or a
+// defensive / own-system framing. Word boundaries matter — "unauthorized" must NOT
+// satisfy it (that was a real bug: `authoriz` matched inside "unauthorized").
 export const SECURITY_SIGNAL =
-  /authoriz|written permission|permission|consent|in-scope|scope of work|scope:|own system|our own|on-prem|defensive|blue.?team|remediat|incident/i;
+  /\bauthoriz(ed|ation)\b|written permission|\bconsent\b|in-scope|out of scope|scope of work|rules of engagement|\bscoped\b|\bscope\b|own system|our own|we operate|own infrastructure|own environment|\bdefensive\b|blue[ -]?team|\bremediat|incident response/i;
 
 // ---------- tiny frontmatter parser (handles the schema we use) ----------
 export function parseScalar(v) {

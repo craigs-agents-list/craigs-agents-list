@@ -17,13 +17,16 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   ROOT, POSTS_DIR, loadCategories, readListing, walk,
-  ALLOWED_TYPES, SECURITY_SIGNAL,
+  ALLOWED_TYPES, SECURITY_SIGNAL, SECURITY_TRIGGER,
 } from "./lib.mjs";
 import { collectBoard, renderArtifacts, GENERATED_FILES } from "./build.mjs";
 
 export const REQUIRED_FIELDS = ["id", "title", "section", "subcat", "type", "region", "date"];
 export const ALLOWED_STATUSES = ["open", "filled", "closed"];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// Strict slug: lowercase alphanumerics + internal hyphens, 1-80 chars, no
+// leading/trailing hyphen. Anything outside this can't reach the UI as an id.
+const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$/;
 // ISO datetime (the `generated` stamp). Used to blank timestamps before comparing
 // generated files, so a fresh build's new timestamp is not mistaken for staleness.
 const ISO_STAMP_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g;
@@ -79,9 +82,16 @@ export function validateListing({ data, body, raw, path, hasFrontmatter }, ctx) 
     if (data[f] === undefined || data[f] === "") err(`missing required field "${f}"`);
   }
 
-  // id must equal the filename
+  // id must equal the filename AND be a strict slug. The id (and the filename it
+  // mirrors) flows into HTML attributes and URLs in the UI, so constraining it to
+  // [a-z0-9-] here is the load-bearing defense against attribute/markup injection
+  // via a crafted filename that would otherwise auto-merge.
   const fileId = path.split("/").pop().replace(/\.md$/, "");
   if (data.id && data.id !== fileId) err(`id "${data.id}" != filename "${fileId}.md"`);
+  const idToCheck = data.id || fileId;
+  if (idToCheck && !SLUG_RE.test(String(idToCheck))) {
+    err(`id "${idToCheck}" must be a slug: lowercase a-z, 0-9 and hyphens, e.g. my-listing`);
+  }
 
   // file must live under posts/<section>/
   const folder = path.split("/")[1];
@@ -115,9 +125,15 @@ export function validateListing({ data, body, raw, path, hasFrontmatter }, ctx) 
   // date format
   if (data.date && !DATE_RE.test(String(data.date))) err(`date "${data.date}" is not YYYY-MM-DD`);
 
-  // security guardrail: authorized/defensive framing required
-  if (data.subcat === "security" && !SECURITY_SIGNAL.test(raw)) {
-    err("security listing must state authorization or defensive/own-system scope (see AGENTS.md §6)");
+  // security guardrail (heuristic): a listing in a security subcat OR one that
+  // mentions offensive-security work anywhere must show authorization/defensive
+  // framing. Checking the title/tags/body (not just the subcat) closes the
+  // "post red-team work under a non-security subcat" bypass.
+  const securityRelevant =
+    data.subcat === "security" ||
+    SECURITY_TRIGGER.test(`${data.title || ""} ${(Array.isArray(data.tags) ? data.tags.join(" ") : "")} ${body}`);
+  if (securityRelevant && !SECURITY_SIGNAL.test(raw)) {
+    err("security/offensive listing must state authorization or defensive/own-system scope (see AGENTS.md §6)");
   }
 
   // no unsafe URL schemes in the body (mirrors the renderer's allowlist)

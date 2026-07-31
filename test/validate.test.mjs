@@ -113,3 +113,29 @@ test("extractUrls finds link and image targets", () => {
   const urls = extractUrls("a [x](https://a.com) and ![y](img.png) here");
   assert.deepEqual(urls, ["https://a.com", "img.png"]);
 });
+
+test("id must be a strict slug (blocks attribute-injection filenames)", () => {
+  assert.ok(errorsFor(goodListing({ id: "Bad_Id" })).some((e) => /must be a slug/.test(e)));
+  const l = goodListing({ id: 'x" onerror=alert(1)' });
+  l.path = 'posts/gigs/x" onerror=alert(1).md';
+  assert.ok(errorsFor(l).some((e) => /must be a slug/.test(e)));
+});
+
+test('"unauthorized" no longer satisfies the security signal', () => {
+  const l = goodListing({ subcat: "security" });
+  l.raw = "---\n...\n---\nwe will perform unauthorized access to the target";
+  l.body = "we will perform unauthorized access to the target";
+  assert.ok(errorsFor(l).some((e) => /authorization or defensive/.test(e)));
+});
+
+test("security check fires outside the security subcat (red-team bypass closed)", () => {
+  const bypass = goodListing({ subcat: "coding" });
+  bypass.raw = "---\n...\n---\nbuild me a red team agent to break into a target";
+  bypass.body = "build me a red team agent to break into a target";
+  assert.ok(errorsFor(bypass).some((e) => /authorization or defensive/.test(e)));
+
+  const authorized = goodListing({ subcat: "coding" });
+  authorized.raw = "---\n...\n---\nauthorized red-team engagement, written scope on file, staging only";
+  authorized.body = "authorized red-team engagement, written scope on file, staging only";
+  assert.deepEqual(errorsFor(authorized), []);
+});
