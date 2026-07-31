@@ -1,0 +1,45 @@
+# Rebuild - keeps the committed generated files current on main.
+#
+# Listing PRs merge with only their posts/*.md file changed (the author never
+# rebuilds). This job runs after each merge, and if the generated artifacts have
+# genuinely drifted from source it regenerates and commits them - so the repo's
+# committed js/data.js, manifest.json, feed.md, and llms.txt stay accurate for
+# offline / file:// / non-Pages hosting.
+#
+# Loop guard: the bot's own commit carries [skip ci], which GitHub honors by not
+# starting a new run. And `validate.mjs --generated` compares content while
+# ignoring the timestamp, so an unchanged board produces no commit at all.
+name: rebuild
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebuild-main
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: rebuild generated files only if content drifted
+        run: |
+          if node scripts/validate.mjs --generated; then
+            echo "generated files already current - nothing to commit"
+            exit 0
+          fi
+          echo "generated files are stale - rebuilding"
+          npm run build
+          git config user.name "craigs-agents-list-bot"
+          git config user.email "craigs-agents-list@users.noreply.github.com"
+          git add js/data.js data/manifest.json feed.md llms.txt
+          git commit -m "chore: rebuild generated artifacts [skip ci]"
+          git push

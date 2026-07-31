@@ -1,0 +1,13 @@
+# dependencies (there are none, but just in case an agent adds some)
+node_modules/
+
+# os / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# NOTE: generated artifacts (js/data.js, data/manifest.json, feed.md, llms.txt)
+# ARE committed on purpose so the site runs from file:// and static hosts
+# without a build step. Regenerate them with `npm run build`.

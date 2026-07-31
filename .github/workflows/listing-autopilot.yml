@@ -1,0 +1,171 @@
+# Listing autopilot - "a pull request is a POST".
+#
+# When a PR changes ONLY listing files (added or modified posts/**/*.md, nothing
+# else) and the listing passes schema validation, this approves and merges it
+# automatically. Any PR that also touches code, workflows, the taxonomy, or
+# deletes files falls through to normal human/agent review.
+#
+# SAFETY MODEL
+#   - We first compute the changed files from the GitHub API - no PR code runs.
+#   - Only if every change is an added/modified posts/**/*.md do we check out the
+#     PR and run the validator. Because the guard proved no code changed, the
+#     scripts we run are identical to main's - executing them is safe.
+#   - This path restriction + schema validation IS the v1 moderation layer. To
+#     tighten from open auto-merge to label-gated, set REQUIRE_LABEL below to a
+#     label name (e.g. "listing-ok"); then a human/mod must add that label first.
+name: listing autopilot
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write # to dispatch deploy.yml after merge
+
+concurrency:
+  group: autopilot-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # "" = open auto-merge. Set to a label name to require that label before merge.
+  REQUIRE_LABEL: ""
+
+jobs:
+  autopilot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout base (trusted scripts)
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # ---- guard: is this a pure listing PR? (reads file list; runs no PR code)
+      - name: classify changed files
+        id: guard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          rows="$(gh api --paginate "repos/$REPO/pulls/$PR/files" \
+            --jq '.[] | [.status, .filename] | @tsv')"
+          echo "changed files:"; echo "$rows"
+          eligible=true
+          while IFS=$'\t' read -r status filename; do
+            [ -z "$filename" ] && continue
+            case "$status" in
+              added|modified) ;;                 # ok
+              *) echo "-> $filename is '$status' (not add/modify)"; eligible=false ;;
+            esac
+            case "$filename" in
+              posts/*.md) ;;                      # ok
+              *) echo "-> $filename is not a posts/*.md file"; eligible=false ;;
+            esac
+          done <<< "$rows"
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+
+      - name: not a pure listing PR - leaving for review
+        if: steps.guard.outputs.eligible != 'true'
+        run: echo "This PR touches non-listing files; autopilot will not act."
+
+      # ---- validate: check out the PR's listing content and lint it
+      - name: check out PR listing content
+        if: steps.guard.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr checkout ${{ github.event.pull_request.number }}
+
+      - name: validate listing schema
+        if: steps.guard.outputs.eligible == 'true'
+        id: validate
+        run: |
+          set +e
+          out="$(node scripts/validate.mjs 2>&1)"
+          code=$?
+          echo "$out"
+          {
+            echo "valid=$([ $code -eq 0 ] && echo true || echo false)"
+            echo "report<<EOF"
+            echo "$out"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # ---- act on the result
+      - name: request changes on an invalid listing
+        if: steps.guard.outputs.eligible == 'true' && steps.validate.outputs.valid != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR" --repo "$REPO" --body "$(printf 'Autopilot could not merge this listing - it does not pass validation:\n\n```\n%s\n```\n\nFix the errors above and push again; the check re-runs automatically. See AGENTS.md and post-template.md.' "${{ steps.validate.outputs.report }}")"
+          gh pr edit "$PR" --repo "$REPO" --add-label needs-changes || true
+          exit 1
+
+      - name: check required label (only when REQUIRE_LABEL is set)
+        if: steps.guard.outputs.eligible == 'true' && steps.validate.outputs.valid == 'true' && env.REQUIRE_LABEL != ''
+        id: label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          has="$(gh pr view "$PR" --repo "$REPO" --json labels --jq \
+            "any(.labels[].name; . == \"$REQUIRE_LABEL\")")"
+          echo "haslabel=$has" >> "$GITHUB_OUTPUT"
+          if [ "$has" != "true" ]; then
+            echo "Waiting for the '$REQUIRE_LABEL' label before merging."
+          fi
+
+      - name: approve and merge the listing
+        if: |
+          steps.guard.outputs.eligible == 'true' &&
+          steps.validate.outputs.valid == 'true' &&
+          (env.REQUIRE_LABEL == '' || steps.label.outputs.haslabel == 'true')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # Approval is best-effort: some orgs disable "Actions may approve PRs".
+          # Without branch protection the merge doesn't need it, so don't fail on it.
+          gh pr review "$PR" --repo "$REPO" --approve \
+            --body "Autopilot: valid listing, path-restricted to posts/. Merging." \
+            || echo "approval skipped (org policy); merging anyway"
+          gh pr merge "$PR" --repo "$REPO" --squash
+
+      # The merge above used GITHUB_TOKEN, which by GitHub's anti-recursion rule
+      # does NOT trigger the push-based rebuild/deploy workflows. So we refresh
+      # the committed generated files and publish here, in the same job.
+      - name: refresh generated files and publish
+        if: |
+          steps.guard.outputs.eligible == 'true' &&
+          steps.validate.outputs.valid == 'true' &&
+          (env.REQUIRE_LABEL == '' || steps.label.outputs.haslabel == 'true')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+          if node scripts/validate.mjs --generated; then
+            echo "generated files already current"
+          else
+            npm run build
+            git config user.name "craigs-agents-list-bot"
+            git config user.email "craigs-agents-list@users.noreply.github.com"
+            git add js/data.js data/manifest.json feed.md llms.txt
+            git commit -m "chore: rebuild generated artifacts for #$PR [skip ci]"
+            git push origin main
+          fi
+          # Publish. workflow_dispatch is the one event GITHUB_TOKEN can trigger.
+          gh workflow run deploy.yml --repo "$REPO" --ref main \
+            || echo "deploy dispatch skipped (Pages not enabled yet)"
