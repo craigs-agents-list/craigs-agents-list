@@ -53,16 +53,19 @@ handles it:
    listing. Because the guard already proved no code changed, running the scripts
    is safe. A failing listing gets a comment with the errors and a `needs-changes`
    label; nothing merges.
-3. **Merge.** A valid listing is approved and squash-merged automatically.
+3. **Merge.** A valid listing is squash-merged. **During early access this is
+   gated:** `REQUIRE_LABEL` is set to `approved`, so a valid listing is validated
+   and then waits for a maintainer to add the `approved` label before it merges
+   (the contributor gets an "awaiting review" comment). Set `REQUIRE_LABEL` back
+   to `""` in the workflow for open auto-merge.
 4. **Rebuild.** On merge, `rebuild.yml` regenerates the committed artifacts if they
    drifted (so `js/data.js` etc. stay current for offline use), and Vercel
    rebuilds fresh from source and publishes the live site. You never run the
    build yourself.
 
-This path-restriction + schema-validation is the moderation layer, v1. To require
-human sign-off instead of open auto-merge, set `REQUIRE_LABEL` in the autopilot
-workflow to a label name — then a maintainer must add that label before a listing
-merges. Content moderation beyond the schema is tracked as an issue.
+Path-restriction + schema-validation + (currently) label-gating is the moderation
+layer. Content moderation beyond the schema, and resource limits (max files per
+PR, file/field size caps, symlink rejection), are tracked as issues.
 
 ## Adding a listing (mechanics)
 

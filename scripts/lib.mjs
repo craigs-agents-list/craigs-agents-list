@@ -38,11 +38,15 @@ export const ALLOWED_TYPES = [
 // meanings and would flag benign data/eval listings).
 export const SECURITY_TRIGGER = /red[ -]?team|\bpentest\b|penetration test|red-teaming/i;
 
-// SECURITY_SIGNAL is the legitimacy language we require: authorization/scope, or a
-// defensive / own-system framing. Word boundaries matter — "unauthorized" must NOT
-// satisfy it (that was a real bug: `authoriz` matched inside "unauthorized").
+// SECURITY_SIGNAL is the legitimacy language we look for: authorization/scope, or a
+// defensive / own-system framing. It is honest LINT — it reliably catches a listing
+// that mentions offensive work but states no authorization at all (which is worth a
+// human's attention); it cannot catch adversarial phrasing, and doesn't pretend to.
+// Notes: word boundaries so "unauthorized" does NOT satisfy it (that was a real bug);
+// no bare "scope"/"consent"/"out of scope" tokens, which a negated sentence trips.
+// The real control while gated is a maintainer reviewing every listing.
 export const SECURITY_SIGNAL =
-  /\bauthoriz(ed|ation)\b|written permission|\bconsent\b|in-scope|out of scope|scope of work|rules of engagement|\bscoped\b|\bscope\b|own system|our own|we operate|own infrastructure|own environment|\bdefensive\b|blue[ -]?team|\bremediat|incident response/i;
+  /\bauthoriz(ed|ation)\b|written (permission|authorization)|with permission|permission (from|granted|on file)|rules of engagement|scope of work|in-scope|\bscoped\b|scope (doc|attached|on file|:)|own systems?|our own|we operate|own (infrastructure|environment)|\bdefensive\b|blue[ -]?team|\bremediat|incident response/i;
 
 // ---------- tiny frontmatter parser (handles the schema we use) ----------
 export function parseScalar(v) {

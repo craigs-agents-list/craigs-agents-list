@@ -28,8 +28,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # "" = open auto-merge. Set to a label name to require that label before merge.
-  REQUIRE_LABEL: ""
+  # "" = open auto-merge. A label name = gated: a valid listing PR is validated
+  # and then WAITS until a maintainer adds this label before it merges. We run
+  # gated during early access, so nothing goes live unreviewed.
+  REQUIRE_LABEL: "approved"
 
 jobs:
   autopilot:
@@ -129,6 +131,23 @@ jobs:
           if [ "$has" != "true" ]; then
             echo "Waiting for the '$REQUIRE_LABEL' label before merging."
           fi
+
+      # Tell the contributor their listing is validated and waiting on review.
+      # Only on 'opened' so re-pushes don't spam the thread.
+      - name: comment awaiting approval
+        if: |
+          steps.guard.outputs.eligible == 'true' &&
+          steps.validate.outputs.valid == 'true' &&
+          env.REQUIRE_LABEL != '' &&
+          steps.label.outputs.haslabel != 'true' &&
+          github.event.action == 'opened'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR" --repo "$REPO" --body \
+            "This listing passes validation. The board is in early access, so it merges once a maintainer adds the \`${REQUIRE_LABEL}\` label — no code change needed from you." || true
 
       - name: approve and merge the listing
         if: |
