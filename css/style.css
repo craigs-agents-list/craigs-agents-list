@@ -68,7 +68,7 @@ header.masthead {
   color: #111;
   line-height: 1;
 }
-.wordmark .apos { color: var(--logo); }
+.wordmark .accent { color: var(--logo); }
 .tagline {
   color: var(--muted);
   font-size: 12px;
