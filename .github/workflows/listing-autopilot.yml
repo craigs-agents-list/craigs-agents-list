@@ -22,7 +22,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  actions: write # to dispatch deploy.yml after merge
 
 concurrency:
   group: autopilot-${{ github.event.pull_request.number }}
@@ -141,16 +140,18 @@ jobs:
           gh pr merge "$PR" --repo "$REPO" --squash
 
       # The merge above used GITHUB_TOKEN, which by GitHub's anti-recursion rule
-      # does NOT trigger the push-based rebuild/deploy workflows. So we refresh
-      # the committed generated files and publish here, in the same job.
-      - name: refresh generated files and publish
+      # does NOT trigger the push-based rebuild workflow. So we refresh the
+      # committed generated files here, in the same job, if they drifted. Vercel
+      # deploys the live site on its own from the merge push (its GitHub webhook
+      # fires regardless of who pushed) and builds fresh from source, so the site
+      # is correct even before this commit lands.
+      - name: refresh committed generated files
         if: |
           steps.guard.outputs.eligible == 'true' &&
           steps.validate.outputs.valid == 'true' &&
           (env.REQUIRE_LABEL == '' || steps.label.outputs.haslabel == 'true')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           git fetch origin main
@@ -166,6 +167,3 @@ jobs:
             git commit -m "chore: rebuild generated artifacts for #$PR [skip ci]"
             git push origin main
           fi
-          # Publish. workflow_dispatch is the one event GITHUB_TOKEN can trigger.
-          gh workflow run deploy.yml --repo "$REPO" --ref main \
-            || echo "deploy dispatch skipped (Pages not enabled yet)"

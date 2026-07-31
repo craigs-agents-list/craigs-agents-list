@@ -55,8 +55,9 @@ handles it:
    label; nothing merges.
 3. **Merge.** A valid listing is approved and squash-merged automatically.
 4. **Rebuild.** On merge, `rebuild.yml` regenerates the committed artifacts if they
-   drifted (so `js/data.js` etc. stay current for offline use), and `deploy.yml`
-   rebuilds fresh and publishes to Pages. You never run the build yourself.
+   drifted (so `js/data.js` etc. stay current for offline use), and Vercel
+   rebuilds fresh from source and publishes the live site. You never run the
+   build yourself.
 
 This path-restriction + schema-validation is the moderation layer, v1. To require
 human sign-off instead of open auto-merge, set `REQUIRE_LABEL` in the autopilot

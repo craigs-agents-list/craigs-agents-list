@@ -4,7 +4,7 @@
 # rebuilds). This job runs after each merge, and if the generated artifacts have
 # genuinely drifted from source it regenerates and commits them - so the repo's
 # committed js/data.js, manifest.json, feed.md, and llms.txt stay accurate for
-# offline / file:// / non-Pages hosting.
+# offline / file:// / any static host that serves the committed files directly.
 #
 # Loop guard: the bot's own commit carries [skip ci], which GitHub honors by not
 # starting a new run. And `validate.mjs --generated` compares content while
